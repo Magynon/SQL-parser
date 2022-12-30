@@ -29,6 +29,7 @@ struct TableNode {
 struct TableNode *tables = NULL;
 char *current_table;
 bool primary_key_found;
+int insert_columns, insert_values, insert_mode_columns;
 %}
 
 %option noyywrap
@@ -42,6 +43,10 @@ bool primary_key_found;
 %x DESCRIBE_TABLE_NAME
 %x DROP_TABLE_NAME
 %x PRIMARY_CONSTRAINT_NAME
+%x INSERT_TABLE_NAME
+%x INSERT_VALUES
+%x INSERT_COLUMNS
+%x INSERT
 
 %%
 
@@ -52,8 +57,6 @@ bool primary_key_found;
 "CREATE"[ ]+"TABLE"[ ]+ { BEGIN(TABLE_NAME); }
 
 <TABLE_NAME>[a-zA-Z][a-zA-Z0-9_]* {
-  // printf("Table name: %s\n", yytext);
-
   // check if the table already exists
   struct TableNode *current = tables;
   while (current != NULL) {
@@ -98,8 +101,6 @@ bool primary_key_found;
 <COLUMN_NAME>"PRIMARY"[ ]+"KEY"[ ]+"\(" { BEGIN(TABLE_PRIMARY_KEY); }
 
 <PRIMARY_CONSTRAINT_NAME>[a-zA-Z][a-zA-Z0-9_]*[ ]+ {
-  // printf("Table constraint name: %s\n", yytext);
-
   // Add the constraint name to the current table
   struct TableNode *current = tables;
   while (strcmp(current->table.name, current_table) != 0) {
@@ -114,8 +115,6 @@ bool primary_key_found;
 }
 
 <TABLE_PRIMARY_KEY>[a-zA-Z][a-zA-Z0-9_]* {
-  // printf("Table primary key: %s\n", yytext);
-
   // Add the primary key to the current table
   struct TableNode *current = tables;
   while (strcmp(current->table.name, current_table) != 0) {
@@ -128,8 +127,6 @@ bool primary_key_found;
 }
 
 <COLUMN_NAME>[a-zA-Z][a-zA-Z0-9_]*[ ]+ { 
-  // printf("Column name: %s\n", yytext);
-
   // check if the column already exists
   struct TableNode *current = tables;
   while (strcmp(current->table.name, current_table) != 0) {
@@ -167,8 +164,6 @@ bool primary_key_found;
 }
 
 <DATA_TYPE>[a-zA-Z][a-zA-Z0-9_\(\)]* {
-  // printf("Data type: %s\n", yytext);
-
   // Add the data type to the current column
   struct TableNode *current = tables;
   while (strcmp(current->table.name, current_table) != 0) {
@@ -186,8 +181,6 @@ bool primary_key_found;
 }
 
 <CONSTRAINT_NAME>"NOT"[ ]+"NULL" {
-  // printf("Column constraint: %s\n", yytext);
-
   // Add the constraint to the current column
   struct TableNode *current = tables;
   while (strcmp(current->table.name, current_table) != 0) {
@@ -215,8 +208,6 @@ bool primary_key_found;
 }
 
 <CONSTRAINT_NAME>"PRIMARY"[ ]+"KEY" {
-  // printf("Column constraint: %s\n", yytext);
-
   struct TableNode *current = tables;
   while (strcmp(current->table.name, current_table) != 0) {
     current = current->next;
@@ -251,13 +242,11 @@ bool primary_key_found;
 "DESCRIBE"[ \t\n]+ {
   BEGIN(DESCRIBE_TABLE_NAME);
 }
-<DESCRIBE_TABLE_NAME>[a-zA-Z][a-zA-Z0-9_]*[ \t\n]*; {
+<DESCRIBE_TABLE_NAME>[a-zA-Z][a-zA-Z0-9_]* {
   if (tables == NULL){
     printf("Invalid command\n");
 
   } else {
-    yytext[strlen(yytext) - 1] = '\0'; // remove the semicolon
-
     struct TableNode *current = tables;
     while (current != NULL) {
       if (strcmp(current->table.name, yytext) == 0) {
@@ -287,6 +276,10 @@ bool primary_key_found;
     // print the number of records
     printf("Number of records: %d\n", current->table.num_records);
   }
+  BEGIN(DESCRIBE_TABLE_NAME);
+}
+
+<DESCRIBE_TABLE_NAME>[ \t\n]*; {
   BEGIN(INITIAL);
 }
 
@@ -296,13 +289,96 @@ bool primary_key_found;
   /* ------------------------- */
 
 
-"INSERT"[ ]+"INTO"[ ]+[a-zA-Z][a-zA-Z0-9_]*[ \t\n]*"VALUES"[ ]+\([^\)]+\)[ ]*; {
-	printf("%s\n", yytext);
-}
-"INSERT"[ ]+"INTO"[ ]+[a-zA-Z][a-zA-Z0-9_]*[ ]+\([^\)]+\)[ \t\n]*"VALUES"[ ]+\([^\)]+\)[ ]*; {
-	printf("%s\n", yytext);
+"INSERT"[ ]+"INTO"[ ]+ {
+  insert_mode_columns = 0;
+  BEGIN(INSERT_TABLE_NAME);
 }
 
+<INSERT_TABLE_NAME>[a-zA-Z][a-zA-Z0-9_]* {
+  if (tables == NULL){
+    printf("Invalid command\n");
+  } else {
+    struct TableNode *current = tables;
+    while (current != NULL) {
+      if (strcmp(current->table.name, yytext) == 0) {
+        strcpy(current_table, yytext);
+        break;
+      }
+      current = current->next;
+    }
+  }
+  BEGIN(INSERT);
+}
+
+<INSERT>[ \t\n]*[\(\),]* {
+  insert_columns = 0;
+  insert_mode_columns = 1;
+  BEGIN(INSERT_COLUMNS);
+}
+
+  /* read values */
+<INSERT>[ \t\n]*"VALUES"[ \t\n]*[a-zA-Z0-9\", \(\)]+ {
+  BEGIN(INSERT_VALUES);
+}
+
+<INSERT_COLUMNS>[a-zA-Z0-9]+ {
+  // increment the number of columns
+  insert_columns++;
+
+  struct TableNode *current = tables;
+  while (strcmp(current->table.name, current_table) != 0) {
+    current = current->next;
+  }
+
+  if (insert_columns > current->table.num_columns) {
+    printf("Invalid command\n");
+    BEGIN(INITIAL);
+  } else {
+    BEGIN(INSERT_COLUMNS);
+  }
+}
+
+<INSERT_COLUMNS>[ \t\n]*","[ \t\n]* {
+  BEGIN(INSERT_COLUMNS);
+}
+
+<INSERT_COLUMNS>[ \t\n]*")" {
+  BEGIN(INSERT_VALUES);
+}
+
+<INSERT_VALUES>[ \t\n]*"VALUES" {
+  insert_values = 0;
+  BEGIN(INSERT_VALUES);
+}
+
+<INSERT_VALUES>[ \t\n]*[\(,] {
+  BEGIN(INSERT_VALUES);
+}
+
+<INSERT_VALUES>[a-zA-Z0-9]+ {
+  printf("Value: %s\n", yytext);
+
+  // increment the number of values
+  insert_values++;
+
+  BEGIN(INSERT_VALUES);
+}
+
+<INSERT_VALUES>")"[ \t\n]*";" {
+  if (insert_mode_columns == 1 && insert_columns != insert_values) {
+    printf("Invalid command\n");
+  } 
+  else {
+    // increment the number of records
+    struct TableNode *current = tables;
+    while (strcmp(current->table.name, current_table) != 0) {
+      current = current->next;
+    }
+    current->table.num_records++;
+  }
+  
+  BEGIN(INITIAL);
+}
 
   /* ------------------------- */
   /*  ALTER TABLE STATE MACHINE */
@@ -325,14 +401,11 @@ bool primary_key_found;
   BEGIN(DROP_TABLE_NAME);
 }
 
-<DROP_TABLE_NAME>[a-zA-Z][a-zA-Z0-9_]*[ \t\n]*; {
+<DROP_TABLE_NAME>[a-zA-Z][a-zA-Z0-9_]* {
   if (tables == NULL) {
-    printf("Invalid command1\n");
+    printf("Invalid command\n");
 
   } else {
-    // remove the semicolon
-    yytext[strlen(yytext) - 1] = '\0';
-
     int tableFound = 0;
     struct TableNode *current = tables;
     struct Table temp;
@@ -400,6 +473,10 @@ bool primary_key_found;
     }
   }
 
+  BEGIN(DROP_TABLE_NAME);
+}
+
+<DROP_TABLE_NAME>[ \t\n]*; {
   BEGIN(INITIAL);
 }
 
