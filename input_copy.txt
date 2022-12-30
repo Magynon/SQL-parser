@@ -1,0 +1,15 @@
+CREATE TABLE Product
+(price number(10) NOT NULL,
+name varchar2(50) PRIMARY KEY
+);
+ALTER TABLE Product DROP COLUMN price;
+ALTER TABLE Product DROP COLUMN name;
+DESCRIBE Product;
+DROP TABLE Product;
+CREATE TABLE Product
+(price number(10) NOT NULL,
+name varchar2(50) PRIMARY KEY
+);
+DESCRIBE Product;
+ALTER TABLE Product ADD colour varchar2(50);
+DESCRIBE Product;

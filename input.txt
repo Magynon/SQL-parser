@@ -1,0 +1,21 @@
+CREATE TABLE employees
+(employee_id number(10) NOT NULL,
+city varchar2(50),
+PRIMARY KEY (employee_id)
+);
+DESCRIBE employees;
+INSERT INTO employees (employee_id, city) VALUES (1, "New York");
+INSERT INTO employees VALUES (2, "London");
+DESCRIBE employees;
+CREATE TABLE Persons (
+ID int NOT NULL PRIMARY KEY,
+LastName varchar(255) NOT NULL,
+FirstName varchar(255)
+);
+DESCRIBE Persons;
+ALTER TABLE Persons ADD Age int;
+DESCRIBE Persons;
+ALTER TABLE Persons DROP COLUMN Age;
+DESCRIBE Persons;
+DROP TABLE employees;
+DROP TABLE Persons;
