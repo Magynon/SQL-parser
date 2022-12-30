@@ -47,6 +47,11 @@ int insert_columns, insert_values, insert_mode_columns;
 %x INSERT_VALUES
 %x INSERT_COLUMNS
 %x INSERT
+%x ALTER_TABLE_NAME
+%x ALTER_TABLE
+%x ALTER_TABLE_ADD
+%x ALTER_TABLE_DROP
+%x ALTER_TABLE_ADD_TYPE
 
 %%
 
@@ -310,14 +315,14 @@ int insert_columns, insert_values, insert_mode_columns;
   BEGIN(INSERT);
 }
 
-<INSERT>[ \t\n]*[\(\),]* {
+<INSERT>[ \t\n]*"(" {
   insert_columns = 0;
   insert_mode_columns = 1;
   BEGIN(INSERT_COLUMNS);
 }
 
   /* read values */
-<INSERT>[ \t\n]*"VALUES"[ \t\n]*[a-zA-Z0-9\", \(\)]+ {
+<INSERT>[ \t\n]*"VALUES"[ \t\n]*"(" {
   BEGIN(INSERT_VALUES);
 }
 
@@ -355,16 +360,14 @@ int insert_columns, insert_values, insert_mode_columns;
   BEGIN(INSERT_VALUES);
 }
 
-<INSERT_VALUES>[a-zA-Z0-9]+ {
-  printf("Value: %s\n", yytext);
-
+<INSERT_VALUES>[a-zA-Z0-9\"]+ {
   // increment the number of values
   insert_values++;
 
   BEGIN(INSERT_VALUES);
 }
 
-<INSERT_VALUES>")"[ \t\n]*";" {
+<INSERT_VALUES>");" {
   if (insert_mode_columns == 1 && insert_columns != insert_values) {
     printf("Invalid command\n");
   } 
@@ -385,13 +388,120 @@ int insert_columns, insert_values, insert_mode_columns;
   /* ------------------------- */
 
 
-"ALTER"[ ]+"TABLE"[ ]+[a-zA-Z][a-zA-Z0-9_]*[ \t\n]+"ADD"[ ]+[a-zA-Z][a-zA-Z0-9_]*[ ]+[a-zA-Z][a-zA-Z0-9_]*; {
-	printf("%s\n", yytext);
-}
-"ALTER"[ ]+"TABLE"[ ]+[a-zA-Z][a-zA-Z0-9_]*[ \t\n]+"DROP"[ ]+"COLUMN"[ ]+[a-zA-Z][a-zA-Z0-9_]*[ ]*; {
-	printf("%s\n", yytext);
+"ALTER"[ ]+"TABLE"[ ]+ {
+  BEGIN(ALTER_TABLE_NAME);
 }
 
+<ALTER_TABLE_NAME>[a-zA-Z][a-zA-Z0-9_]* {
+  int found = 0;
+  if (tables == NULL){
+    printf("Invalid command\n");
+  } else {
+    struct TableNode *current = tables;
+    while (current != NULL) {
+      if (strcmp(current->table.name, yytext) == 0) {
+        strcpy(current_table, yytext);
+        found = 1;
+        break;
+      }
+      current = current->next;
+    }
+  }
+  if (found == 0) {
+    printf("Invalid command\n");
+    BEGIN(INITIAL);
+  } else {
+    BEGIN(ALTER_TABLE);
+  }
+}
+
+<ALTER_TABLE>"ADD" {
+  BEGIN(ALTER_TABLE_ADD);
+}
+
+<ALTER_TABLE>"DROP"[ \t\n]*"COLUMN" {
+  BEGIN(ALTER_TABLE_DROP);
+}
+
+<ALTER_TABLE_ADD>[a-zA-Z][a-zA-Z0-9_]* {
+  printf("Column: %s\n", yytext);
+
+  // add the column to the table
+  struct TableNode *current = tables;
+  while (strcmp(current->table.name, current_table) != 0) {
+    current = current->next;
+  }
+  current->table.num_columns++;
+
+  struct Column *newColumn = (struct Column *) malloc(sizeof(struct Column));
+  newColumn->name = (char *) malloc(strlen(yytext) + 1);
+  strcpy(newColumn->name, yytext);
+  newColumn->next = NULL;
+
+  if (current->table.columns == NULL) {
+    current->table.columns = newColumn;
+  } else {
+    struct Column *currentColumn = current->table.columns;
+    while (currentColumn->next != NULL) {
+      currentColumn = currentColumn->next;
+    }
+    currentColumn->next = newColumn;
+  }
+
+  BEGIN(ALTER_TABLE_ADD_TYPE);
+}
+
+<ALTER_TABLE_ADD_TYPE>[a-zA-Z][a-zA-Z0-9_]* {
+  printf("Type: %s\n", yytext);
+
+  // add the type to the table
+  struct TableNode *current = tables;
+  while (strcmp(current->table.name, current_table) != 0) {
+    current = current->next;
+  }
+
+  struct Column *currentColumn = current->table.columns;
+  while (currentColumn->next != NULL) {
+    currentColumn = currentColumn->next;
+  }
+  currentColumn->data_type = (char *) malloc(strlen(yytext) + 1);
+  strcpy(currentColumn->data_type, yytext);
+
+  BEGIN(ALTER_TABLE);
+}
+
+<ALTER_TABLE_DROP>[a-zA-Z][a-zA-Z0-9_]* {
+  printf("Column: %s\n", yytext);
+
+  // remove the column from the table
+  struct TableNode *current = tables;
+  while (strcmp(current->table.name, current_table) != 0) {
+    current = current->next;
+  }
+  current->table.num_columns--;
+
+  struct Column *currentColumn = current->table.columns;
+  struct Column *previousColumn = NULL;
+  while (currentColumn != NULL) {
+    if (strcmp(currentColumn->name, yytext) == 0) {
+      if (previousColumn == NULL) {
+        current->table.columns = currentColumn->next;
+      } else {
+        previousColumn->next = currentColumn->next;
+      }
+      free(currentColumn);
+      break;
+    }
+    previousColumn = currentColumn;
+    currentColumn = currentColumn->next;
+  }
+
+  BEGIN(ALTER_TABLE);
+}
+
+<ALTER_TABLE>";" {
+  BEGIN(INITIAL);
+}
 
   /* ------------------------- */
   /*  DROP TABLE STATE MACHINE */
@@ -482,8 +592,8 @@ int insert_columns, insert_values, insert_mode_columns;
 
 "--".*\n { BEGIN(COMMENT); }
 <COMMENT>.+\n { BEGIN(INITIAL); }
+.\n { BEGIN(INITIAL); }
 
-[ \t\n]+ { /* ignore whitespace */ }
 . { printf("Invalid command\n"); }
 
 %%
